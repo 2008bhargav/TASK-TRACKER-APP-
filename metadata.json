@@ -1,0 +1,6 @@
+{
+  "name": "MultiTask Hub",
+  "description": "An all-in-one multitasking suite featuring Voice & Image Notes, a styled 3D Calculator, complete Clock hub (Alarm, Timer, Stopwatch, World Clock), live GPS Weather, and 4 classic offline Games.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
