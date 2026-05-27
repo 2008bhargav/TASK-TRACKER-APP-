@@ -1,6 +1,8 @@
 package com.example.data
 
 import com.squareup.moshi.Json
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.GET
@@ -29,9 +31,13 @@ interface WeatherApi {
 object WeatherClient {
     private const val BASE_URL = "https://api.open-meteo.com/"
 
+    private val moshi = Moshi.Builder()
+        .addLast(KotlinJsonAdapterFactory())
+        .build()
+
     private val retrofit = Retrofit.Builder()
         .baseUrl(BASE_URL)
-        .addConverterFactory(MoshiConverterFactory.create())
+        .addConverterFactory(MoshiConverterFactory.create(moshi))
         .build()
 
     val api: WeatherApi = retrofit.create(WeatherApi::class.java)

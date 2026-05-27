@@ -41,6 +41,12 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.Date
+import android.Manifest
+import android.os.Build
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -62,7 +68,8 @@ fun NotesScreen(
     
     // Media result configurations
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
+    var capturedImageFile by remember { mutableStateOf<File?>(null) }
     
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -71,9 +78,69 @@ fun NotesScreen(
     }
     
     val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap ->
-        capturedBitmap = bitmap
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (!success) {
+            cameraImageUri = null
+            capturedImageFile = null
+        }
+    }
+
+    val storagePermissionsToRequest = remember {
+        if (Build.VERSION.SDK_INT >= 33) {
+            listOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_AUDIO
+            )
+        } else {
+            listOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        }
+    }
+
+    var pendingStorageAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val allGranted = results.values.all { it }
+        if (allGranted) {
+            pendingStorageAction?.invoke()
+        } else {
+            Toast.makeText(context, "Storage permissions are required to access and save media.", Toast.LENGTH_SHORT).show()
+        }
+        pendingStorageAction = null
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            try {
+                val file = File(context.filesDir, "note_img_${System.currentTimeMillis()}.jpg")
+                capturedImageFile = file
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                cameraImageUri = uri
+                cameraLauncher.launch(uri)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(context, "Error setting up camera output: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Camera permission is required to snapshot notes.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.startVoiceRecording()
+        } else {
+            Toast.makeText(context, "Microphone permission is required to record voice notes.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     Box(
@@ -204,7 +271,8 @@ fun NotesScreen(
             Dialog(onDismissRequest = {
                 showAddDialog = false
                 selectedImageUri = null
-                capturedBitmap = null
+                cameraImageUri = null
+                capturedImageFile = null
                 viewModel.stopVoiceRecording()
             }) {
                 Card(
@@ -304,7 +372,13 @@ fun NotesScreen(
                                         }
                                         Spacer(modifier = Modifier.height(8.dp))
                                         IconButton(
-                                            onClick = { viewModel.startVoiceRecording() },
+                                            onClick = {
+                                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                                    viewModel.startVoiceRecording()
+                                                } else {
+                                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                                }
+                                            },
                                             colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFFBA1A1A)),
                                             modifier = Modifier.size(54.dp)
                                         ) {
@@ -325,9 +399,9 @@ fun NotesScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 when {
-                                    capturedBitmap != null -> {
-                                        Image(
-                                            bitmap = capturedBitmap!!.asImageBitmap(),
+                                    cameraImageUri != null -> {
+                                        AsyncImage(
+                                            model = cameraImageUri,
                                             contentDescription = "Captured",
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize()
@@ -346,7 +420,22 @@ fun NotesScreen(
                                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                                         ) {
                                             Button(
-                                                onClick = { cameraLauncher.launch() },
+                                                onClick = {
+                                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                                        try {
+                                                            val file = File(context.filesDir, "note_img_${System.currentTimeMillis()}.jpg")
+                                                            capturedImageFile = file
+                                                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                                                            cameraImageUri = uri
+                                                            cameraLauncher.launch(uri)
+                                                        } catch (e: Exception) {
+                                                            e.printStackTrace()
+                                                            Toast.makeText(context, "Error setting up camera: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } else {
+                                                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                                    }
+                                                },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
                                                 shape = RoundedCornerShape(24.dp)
                                             ) {
@@ -355,7 +444,9 @@ fun NotesScreen(
                                                 Text("Camera", color = Color.White)
                                             }
                                             Button(
-                                                onClick = { galleryLauncher.launch("image/*") },
+                                                onClick = {
+                                                    galleryLauncher.launch("image/*")
+                                                },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
                                                 shape = RoundedCornerShape(24.dp)
                                             ) {
@@ -379,7 +470,8 @@ fun NotesScreen(
                                 onClick = {
                                     showAddDialog = false
                                     selectedImageUri = null
-                                    capturedBitmap = null
+                                    cameraImageUri = null
+                                    capturedImageFile = null
                                     viewModel.stopVoiceRecording()
                                 },
                                 shape = RoundedCornerShape(24.dp),
@@ -392,17 +484,8 @@ fun NotesScreen(
                                 onClick = {
                                     var imageSavePath: String? = null
                                     if (noteTypeToAdd == "image") {
-                                        if (capturedBitmap != null) {
-                                            try {
-                                                val file = File(context.filesDir, "note_img_${System.currentTimeMillis()}.png")
-                                                val out = FileOutputStream(file)
-                                                capturedBitmap!!.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                                out.flush()
-                                                out.close()
-                                                imageSavePath = file.absolutePath
-                                            } catch (e: Exception) {
-                                                e.printStackTrace()
-                                            }
+                                        if (capturedImageFile != null && capturedImageFile!!.exists()) {
+                                            imageSavePath = capturedImageFile!!.absolutePath
                                         } else if (selectedImageUri != null) {
                                             imageSavePath = selectedImageUri.toString()
                                         }
@@ -415,7 +498,8 @@ fun NotesScreen(
                                     )
                                     showAddDialog = false
                                     selectedImageUri = null
-                                    capturedBitmap = null
+                                    cameraImageUri = null
+                                    capturedImageFile = null
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = when (noteTypeToAdd) {

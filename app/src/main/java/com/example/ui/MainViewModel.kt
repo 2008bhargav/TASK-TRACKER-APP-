@@ -345,7 +345,8 @@ class MainViewModel(
                     isGPS = false
                 )
             } catch (e: Exception) {
-                _weatherState.value = WeatherUiState.Error("Network Error. Check internet connection.")
+                e.printStackTrace()
+                _weatherState.value = WeatherUiState.Error("Network Error: ${e.localizedMessage ?: "Check connection"}")
             }
         }
     }
